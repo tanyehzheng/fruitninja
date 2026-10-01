@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="description" content="Fruit Slash — a webcam gesture-controlled Fruit Ninja style game that runs entirely in your browser.">
+  <title>Fruit Slash — Gesture Ninja</title>
+
+  <!-- Arcade fonts (optional; the game falls back to Impact / system fonts if offline) -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Luckiest+Guy&family=Nunito:wght@600;800&display=swap" rel="stylesheet">
+
+  <link rel="stylesheet" href="style.css">
+
+  <!-- MediaPipe Hands: real-time hand landmark tracking (loaded from CDN, runs fully client-side in WASM) -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/hands.min.js" crossorigin="anonymous"></script>
+</head>
+<body>
+
+  <!-- Hidden webcam feed. MediaPipe reads frames from it; the game optionally draws it faintly behind the action. -->
+  <video id="webcam" playsinline muted autoplay></video>
+
+  <!-- Main render target -->
+  <canvas id="game" aria-label="Fruit Slash game canvas"></canvas>
+
+  <!-- ============ HEADS-UP DISPLAY ============ -->
+  <div id="hud" class="hidden">
+    <div class="hud-left">
+      <div class="hud-label">SCORE</div>
+      <div id="score" class="hud-value">0</div>
+      <div id="hiscore" class="hud-sub">BEST 0</div>
+    </div>
+
+    <div class="hud-center">
+      <div id="combo" class="combo"></div>
+      <div id="powerups" class="powerups"></div>
+    </div>
+
+    <div class="hud-right">
+      <div id="lives" class="lives" aria-label="Lives"></div>
+      <div class="hud-buttons">
+        <button id="btn-pause" class="icon-btn" title="Pause (P)" aria-label="Pause">⏸</button>
+        <button id="btn-mute" class="icon-btn" title="Mute (M)" aria-label="Mute">🔊</button>
+        <button id="btn-cam" class="icon-btn" title="Toggle camera preview (C)" aria-label="Toggle camera preview">📷</button>
+      </div>
+    </div>
+
+    <div id="hand-status" class="hand-status hidden">🖐 Tracking</div>
+  </div>
+
+  <!-- ============ START SCREEN ============ -->
+  <section id="screen-start" class="screen">
+    <div class="panel">
+      <h1 class="title">FRUIT<span>SLASH</span></h1>
+      <p class="tagline">Slice flying fruit with your finger. Dodge the bombs. Chain combos.</p>
+
+      <div class="option-group">
+        <span class="option-label">Difficulty</span>
+        <div class="segmented" id="difficulty">
+          <button data-value="easy">🌱 Easy</button>
+          <button data-value="normal" class="active">🔥 Normal</button>
+          <button data-value="hard">💀 Hard</button>
+        </div>
+        <p id="difficulty-desc" class="option-desc"></p>
+      </div>
+
+      <div class="button-stack">
+        <button id="btn-start-hand" class="btn primary">🖐 Play with Webcam</button>
+        <button id="btn-start-touch" class="btn">👆 Play with Touch / Mouse</button>
+      </div>
+
+      <div class="button-row">
+        <button id="btn-stats" class="btn small">📊 Stats</button>
+        <button id="btn-achievements" class="btn small">🏆 Achievements</button>
+      </div>
+
+      <p id="start-status" class="status" role="status" aria-live="polite"></p>
+
+      <p class="help">
+        Hold your hand up to the camera and point with your <b>index finger</b>.
+        Swipe quickly through fruit to slice it. Press <kbd>P</kbd> to pause, <kbd>M</kbd> to mute.
+      </p>
+    </div>
+  </section>
+
+  <!-- ============ COUNTDOWN ============ -->
+  <section id="screen-countdown" class="screen transparent hidden">
+    <div id="countdown-number" class="countdown">3</div>
+  </section>
+
+  <!-- ============ PAUSE ============ -->
+  <section id="screen-pause" class="screen hidden">
+    <div class="panel compact">
+      <h2 class="heading">PAUSED</h2>
+      <div class="button-stack">
+        <button id="btn-resume" class="btn primary">▶ Resume</button>
+        <button id="btn-quit" class="btn">🏠 Main Menu</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ GAME OVER ============ -->
+  <section id="screen-gameover" class="screen hidden">
+    <div class="panel">
+      <h2 class="heading">GAME OVER</h2>
+      <div id="newbest" class="badge hidden">🎉 NEW HIGH SCORE!</div>
+      <div class="final-score">
+        <div class="hud-label">FINAL SCORE</div>
+        <div id="final-score" class="big-number">0</div>
+        <div id="final-best" class="hud-sub">BEST 0</div>
+      </div>
+      <div id="final-stats" class="stat-grid"></div>
+      <div class="button-stack">
+        <button id="btn-restart" class="btn primary">🔄 Play Again</button>
+        <button id="btn-menu" class="btn">🏠 Main Menu</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ STATISTICS ============ -->
+  <section id="screen-stats" class="screen hidden">
+    <div class="panel">
+      <h2 class="heading">STATISTICS</h2>
+      <div id="stats-grid" class="stat-grid wide"></div>
+      <div class="button-row">
+        <button id="btn-reset-stats" class="btn small danger">🗑 Reset</button>
+        <button id="btn-stats-back" class="btn small">← Back</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ ACHIEVEMENTS ============ -->
+  <section id="screen-achievements" class="screen hidden">
+    <div class="panel">
+      <h2 class="heading">ACHIEVEMENTS</h2>
+      <p id="achievement-count" class="hud-sub"></p>
+      <div id="achievement-list" class="achievement-list"></div>
+      <div class="button-row">
+        <button id="btn-achievements-back" class="btn small">← Back</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- Achievement toasts + screen flash overlay -->
+  <div id="toast-container" aria-live="polite"></div>
+  <div id="flash"></div>
+
+  <script src="game.js"></script>
+</body>
+</html>
